@@ -1,0 +1,11 @@
+{
+  "name": "hedon",
+  "version": "0.0.1",
+  "main": "hedon.js",
+  "license": "WTFPL",
+  "dependencies": {
+    "ansi-colors": "^4.1.1",
+    "cli-highlight": "^2.1.11",
+    "js-beautify": "^1.14.0"
+  }
+}
