@@ -86,6 +86,8 @@ const help = `==== hedon interactive, help ==== <=
     ctrl n       - clear context
     ctrl l       - clear all frament outputs
     ctrl c       - exit
+    ctrl j       - jump to line
+    ctrl f       - find
     ins          - detach/attach fragment
     ctrl ins     - split fragment at cursor
     ctrl alt n   - new context
@@ -245,6 +247,7 @@ function addContext(name) {
                 runInHedon: false,
                 highlight: true,
                 scrollSpeed: 10,
+                lineNumbers: true,
             },
             util: {
                 lsFrag: ()=>Object.keys(curCtx.$meta.fragments),
@@ -287,16 +290,19 @@ async function draw(skipCursor) {
 
 
     let outBuf='';
-
+    let cursorOffset=0;
+    let fragLines;
     for(const fk in curCtx.$meta.fragments ) {
         const frag = curCtx.$meta.fragments[fk];
         const space = (frag.edit.executed)
                             ? ((curCtx.$meta.opts.runInHedon)?'H':' ')
                             : ((curCtx.$meta.opts.runInHedon)?'h':'|');
         const source = (curCtx.$meta.opts.highlight)?highlight(frag.code.join('\n'), highlightOpts).split('\n'):frag.code;
+        fragLines=0;
+        const maxLinesWidth = (''+(source.length+1)).length;
         for(const line of source) {
-
-            const prefix = ((frag.edit.error)
+            const linesString = (curCtx.$meta.opts.lineNumbers)?(''+(fragLines+1)).padStart(maxLinesWidth,' '):'';
+            const prefix = linesString + ((frag.edit.error)
                             ? c.bgRed(space)
                                 : (frag.detached)
                                 ? c.bgYellow.black(space)
@@ -305,8 +311,12 @@ async function draw(skipCursor) {
                                         : c.bgGreen.black(space))+' ';
 
             outBuf +=(prefix+line+'\n');
-            l++;
+            if( fk === curCtx.$meta.curFrag.name && fragLines === curCtx.$meta.curFrag.edit.row) {
+                cursorOffset = linesString.length+2;
+            }
+            fragLines++;
         }
+        l += fragLines;
         if( fk === curCtx.$meta.curFrag.name) {
             newY = l - curCtx.$meta.curFrag.code.length + curCtx.$meta.curFrag.edit.row - viewPort.firstLine;
         }
@@ -339,7 +349,7 @@ async function draw(skipCursor) {
 	await stdout.clearScreenDown();
     // here print outpuf
     await stdout.write(outBuf);
-    await stdout.cursorTo(curCtx.$meta.curFrag.edit.col+2, newY)
+    await stdout.cursorTo(curCtx.$meta.curFrag.edit.col+cursorOffset, newY)
 
 
 
@@ -373,7 +383,6 @@ function exe(ctx) {
         frag.edit.col = frag.code[ frag.edit.row ].length ;
     }
 
-    logOut = frag.out;
 
     if(frag.detached) {
         delete curCtx.$meta.fragments[frag.name];
@@ -383,10 +392,14 @@ function exe(ctx) {
     frag.edit.executed = true;
     try {
         let retVal;
+        logOut = frag.out;
         if(ctx.$meta.opts.runInHedon) {
             retVal = eval(code);
         } else {
-            retVal = vm.runInContext( code, ctx );
+            const ctxOpt = {
+                filename: `${ctx.$meta.name}.${frag.name}`
+            };
+            retVal = vm.runInContext( code, ctx, ctxOpt );
         }
         if(retVal !== undefined) {
             frag.out = ('=> '+retVal).split('\n').concat(logOut);
@@ -402,7 +415,7 @@ function exe(ctx) {
         ctx.$meta.executedScript += `\n// ${frag.name} r ${frag.revision}\n${code}\n`;
     } catch (e) {
         frag.edit.error = true;
-        logOut.push(e.toString() );
+        frag.out = frag.out.concat(e.stack.split('\n'));
     }
 
     if(frag.detached) {
@@ -448,10 +461,14 @@ stdout.on('resize', resize);
 
 let searchTerm = false;
 let exitCount=0;
-
+let searchLines=false;
 function writeFind() {
             stdout.cursorTo(0);
-            stdout.write( `>> FIND:                                 `);
+            if(searchLines) {
+                stdout.write( `>> JUMP:                                 `);
+            } else {
+                stdout.write( `>> FIND:                                 `);
+            }
             stdout.cursorTo(9);
             stdout.write(c.red(searchTerm));
 }
@@ -471,6 +488,12 @@ stdin.on('data', function (key){
 	switch(hex) {
         case '06': // ctrl + f = find
             searchTerm = '';
+            searchLines=false;
+            writeFind();
+        break;
+        case '0a':
+            searchTerm ='';
+            searchLines=true;
             writeFind();
         break;
         case '04': // ctrl + d clear line
@@ -744,6 +767,19 @@ stdin.on('data', function (key){
         case '0d': // enter
             if(searchTerm !== false) {
                 {
+                    if(searchLines) {
+                        const jumpLine = parseInt(searchTerm);
+                        if(!isNaN(jumpLine)) {
+                            if(jumpLine-1 < curCtx.$meta.curFrag.code.length) {
+                                curCtx.$meta.curFrag.edit.col=0;
+                                curCtx.$meta.curFrag.edit.row=jumpLine-1;
+                            }
+                        }
+                        searchLines=false;
+                        searchTerm=false;
+                        draw();
+                        return;
+                    }
                     let idx=0;
                     let first=-1;
                     let foundAfter=-1;
