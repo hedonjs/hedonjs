@@ -14,10 +14,12 @@ const highlightOpts = { language: 'javascript', ignoreIllegals: true, theme: hlt
 const {stdin, stdout} = process;
 const contexts = {};
 
-function createFragment(map, name) {
-    return map[name] = {
+
+function createFragment(name) {
+    return {
         name,
-        revision: 0,
+        revision:-1,
+        detached: false,
         code: [''],
         edit: {
             row: 0,
@@ -29,7 +31,18 @@ function createFragment(map, name) {
     };
 }
 
+function addFragment(map, frag) {
+    return map[frag.name]=frag;
+}
+
 let logOut = null;
+
+const viewPort = {
+    height: 100,
+    width: 80,
+    firstLine: 0,
+    curPos: 0,
+};
 
 function ctxLog(...out) {
     if(!logOut) {
@@ -48,8 +61,15 @@ const help = `==== hedon interactive, help ==== <=
   ctrl + n  - clear context
   ctrl + l  - clear all frament outputs
   ctrl + c  - exit
-  pgup      - previous fragment
-  pgdn      - next fragment
+  ins       - detach/attach fragment
+  pgup      - first line of fragment
+  pgdn      - last line of fragment
+  ctrl + pgup - previous fragment
+  ctrl + pgdn - next fragment
+  alt + pgup  - scroll up
+  alt + pgdn - scroll down
+  ctrl + up - previous fragment revision
+  ctrl + dn - next fragment revision
   tab       - autocomplete word or insert tab
   Also look at the methods on $meta.
 
@@ -77,15 +97,23 @@ function ctxSave(fn) {
     return `Written ${out.length} lines to ${fn}.`;
 }
 
-function ctxLoad(fn) {
+function ctxLoad(fn, overwrite) {
     if(!fn) {
-        return '$meta.load(\'filename\'); loads file into new fragment.';
+        return '$meta.load(\'filename\', ?overwrite=false); loads file into new fragment. ';
     }
 
     try {
         const source = (`// File: ${fn}\n`+fs.readFileSync( fn, {encoding:'utf8'})).split('\n');
+        
+        let fragName = 'file_'+fn;
+        if(!overwrite) {
+            let i=0;
+            while( curCtx.$meta.fragments[fragName] ) {
+                fragName = 'file_'+fn+'_'+(i++);
+            }
+        }
 
-        const newFrag = createFragment(curCtx.$meta.fragments, 'file_'+fn);
+        const newFrag = addFragment( curCtx.$meta.fragments, createFragment(fragName));
 
         newFrag.code = source;
 
@@ -94,8 +122,25 @@ function ctxLoad(fn) {
     } catch(e) {
         return `Couldn't load file`;
     }
+}
 
+function ctxMergeFrags(a,b) {
+    if(!b) {
+        return `mergeFrags( fragNameA, fragNameB ); Merge fragmentB into fragmentA and delete fragmentB`;
+    }
 
+    const fragA = curCtx.$meta.fragments[a];
+    if(!fragA) {
+        return `No fragment '${a}'`;
+    }
+    const fragB = curCtx.$meta.fragments[b];
+    if(!fragB) {
+        return `No fragment '${b}'`;
+    }
+
+    fragA.code = fragA.code.concat( fragB.code );
+    fragA.executed = (fragA.executed && fragB.executed);
+    delete curCtx.$meta.fragments[b]; 
 }
 
 function addContext(name) {
@@ -104,13 +149,20 @@ function addContext(name) {
         '$meta': {
             name: name,
             fragments: {},
+            numFrags: 1,
             curFrag: null,
+            history: {},
             log: ctxLog,
             save: ctxSave,
             load: ctxLoad,
             opts: {
                 format: true,
                 highlight: true,
+                scrollSpeed: 10,
+            },
+            util: {
+                lsFrag: ()=>Object.keys(curCtx.$meta.fragments),
+                mergeFrags: ctxMergeFrags
             }
         },
         require,
@@ -124,9 +176,9 @@ function addContext(name) {
         help,
 
     };
-    ctx.$meta.curFrag = createFragment( ctx.$meta.fragments, 'main');
+    ctx.$meta.curFrag = addFragment(ctx.$meta.fragments, createFragment( 'frag_0'));
 
-    return contexts[name] = vm.createContext(ctx);;
+    return contexts[name] = vm.createContext(ctx, {name: ctx.$meta.name});
 }
 
 let curCtx = addContext('new');
@@ -135,39 +187,57 @@ let curCtx = addContext('new');
 const edit = curCtx.$meta.curFrag.edit;
 
 async function draw() {
-	await stdout.cursorTo(0,0);
-	await stdout.clearScreenDown();
-
 
     let n=0;
     let l=0;
     let newY = -1;
     let newX = -1;
+
+
+    let outBuf='';
+
     for(const fk in curCtx.$meta.fragments ) {
         const frag = curCtx.$meta.fragments[fk];
         const space = (frag.edit.executed)?' ':'|';
         const source = (curCtx.$meta.opts.highlight)?highlight(frag.code.join('\n'), highlightOpts).split('\n'):frag.code;
         for(const line of source) {
             if( frag.edit.error ) {
-                stdout.write(c.bgRed(space));
+                outBuf += (c.bgRed(space));
+            } else if(frag.detached) {
+                outBuf += (c.bgYellow.black(space));
             } else if( (n%2===0)) {
-                stdout.write(c.bgBlue(space));
+                outBuf += (c.bgBlue.white(space));
             } else {
-                stdout.write(c.bgGreen(space));
+                outBuf += (c.bgGreen.black(space));
             }
-            stdout.write(line+'\n');
+            outBuf +=(line+'\n');
             l++;
         }
         if( fk === curCtx.$meta.curFrag.name) {
-            newY = l - curCtx.$meta.curFrag.code.length + curCtx.$meta.curFrag.edit.row;
+            newY = l - curCtx.$meta.curFrag.code.length + curCtx.$meta.curFrag.edit.row - viewPort.firstLine;
         }
         for(const line of frag.out) {
-            stdout.write(line+'\n');
+            outBuf += (line+'\n');
             l++;
         }
         n++;
     }
 
+    // TODO: these while loops are idiocracy, but I'm tired and can't math, fix
+    while(newY-3 < 0 && viewPort.firstLine>0) {
+        newY++;
+        viewPort.firstLine--;
+    }
+    while(newY+3 > viewPort.height  ) {
+        newY--;
+        viewPort.firstLine++;
+    }
+
+    outBuf = outBuf.split('\n').splice(viewPort.firstLine, viewPort.height).join('\n');
+	await stdout.cursorTo(0,0);
+	await stdout.clearScreenDown();
+    // here print outpuf
+    await stdout.write(outBuf);
     await stdout.cursorTo(curCtx.$meta.curFrag.edit.col+1, newY);
 
 
@@ -175,50 +245,70 @@ async function draw() {
 }
 
 const beautifyOpts = {
-    indent_size: 2,
+    indent_size: 4,
     space_in_empty_paren: true,
-    };
+};
 
 
 function exe(ctx) {
 
-    let code = ctx.$meta.curFrag.code.join('\n');
+    const frag = ctx.$meta.curFrag;
+    let code = frag.code.join('\n');
 
     if(ctx.$meta.opts.format) {
         code = beautify( code, beautifyOpts );
     }
 
-    ctx.$meta.curFrag.code = code.split('\n');
+    frag.code = code.split('\n');
 
-    const row = ctx.$meta.curFrag.edit.row;
-    const col = ctx.$meta.curFrag.edit.col;
+    const row = frag.edit.row;
+    const col = frag.edit.col;
 
-    if(row > ctx.$meta.curFrag.code.length -1 ) {
-        ctx.$meta.curFrag.edit.row = ctx.$meta.curFrag.code.length -1;
+    if(row > frag.code.length -1 ) {
+        frag.edit.row = frag.code.length -1;
     }
 
-    if(col > ctx.$meta.curFrag.code[ ctx.$meta.curFrag.edit.row ].length -1 ) {
-        ctx.$meta.curFrag.edit.col = ctx.$meta.curFrag.code[ ctx.$meta.curFrag.edit.row ].length ;
+    if(col > frag.code[ frag.edit.row ].length -1 ) {
+        frag.edit.col = frag.code[ frag.edit.row ].length ;
     }
 
-    logOut = ctx.$meta.curFrag.out;
-    ctx.$meta.curFrag.edit.executed = true;
+    logOut = frag.out;
+
+    if(frag.detached) {
+        delete curCtx.$meta.fragments[frag.name];
+        curCtx.$meta.curFrag = null;
+    }
+
+    frag.edit.executed = true;
     try {
         const retVal = vm.runInContext( code, ctx );
         if(retVal !== undefined) {
-            ctx.$meta.curFrag.out = ('=> '+retVal).split('\n').concat(logOut);
+            frag.out = ('=> '+retVal).split('\n').concat(logOut);
         }
-        ctx.$meta.curFrag.edit.error = false;
+        frag.edit.error = false;
+        const his = curCtx.$meta.history;
+        if(!his[frag.name]) {
+            his[frag.name] = [];
+        }
+        const fhis = his[frag.name];
+        frag.revision = fhis.length;
+        fhis.push( JSON.parse( JSON.stringify(frag) ) );
     } catch (e) {
-        ctx.$meta.curFrag.edit.error = true;
+        frag.edit.error = true;
         logOut.push(e.toString() );
+    }
+
+    if(frag.detached) {
+        curCtx.$meta.fragments[frag.name] = frag;
+        curCtx.$meta.curFrag = frag;
     }
 }
 
 function resize() {
+    viewPort.width = stdout.columns;
+    viewPort.height = stdout.rows;
 	draw();
 }
-resize();
 
 function whitespace(str) {
 
@@ -232,19 +322,23 @@ function whitespace(str) {
     }
 }
 
-
-
-
 stdin.setRawMode(true);
 stdin.setEncoding('utf8');
-
-stdout.on('resize', resize);
 
 stdin.resume();
 
 let autoCompleteCandidate = null;
 let justSetCandidate=false;
 let autoCompleteOffset=0;
+
+if(process.argv[2]) {
+    const initLoadFn = process.argv[2];
+    ctxLoad(initLoadFn);
+}
+resize();
+stdout.on('resize', resize);
+
+let searchTerm = false;
 
 stdin.on('data', function (key){
 	const hex=Buffer.from(key).toString('hex');
@@ -259,13 +353,22 @@ stdin.on('data', function (key){
     justSetCandidate=false;
 
 	switch(hex) {
+        case '06': // ctrl +f = find
+            searchTerm = '';
+            stdout.cursorTo(0);
+            stdout.write( '>> FIND:                                 ');
+            stdout.cursorTo(9);
+        break;
         case '04': // ctrl + d clear line
-            code[row] = '';
-            curCtx.$meta.curFrag.edit.col = 0;
-            if(code.length>1) {
-                code.splice( row,1 );
-                if(row == code.length ) {
-                    curCtx.$meta.curFrag.edit.row--;
+            if( code[row].length) {
+                code[row] = '';
+                curCtx.$meta.curFrag.edit.col = 0;
+            } else { 
+                if(code.length>1) {
+                    code.splice( row,1 );
+                    if(row == code.length ) {
+                        curCtx.$meta.curFrag.edit.row--;
+                    }
                 }
             }
             draw();
@@ -281,6 +384,35 @@ stdin.on('data', function (key){
             exe(curCtx);
             draw();
         break;
+        case '1b5b363b337e': // alt + pg dn
+            {
+                const edit = curCtx.$meta.curFrag.edit;
+                const code = curCtx.$meta.curFrag.code;
+                edit.row += curCtx.$meta.opts.scrollSpeed;
+                if(edit.row > code.length) {
+                    edit.row = code.length -1;
+                }
+                if(edit.col >= code[edit.row].length) {
+                    edit.col = code[edit.row].length-1;
+                }
+            }
+            draw();
+        break;
+        case '1b5b353b337e': // alt + pg up
+            {
+                const edit = curCtx.$meta.curFrag.edit;
+                const code = curCtx.$meta.curFrag.code;
+                edit.row -= curCtx.$meta.opts.scrollSpeed;
+                if(edit.row < 0) {
+                    edit.row = 0;
+                }
+                if(edit.col >= code[edit.row].length) {
+                    edit.col = code[edit.row].length-1;
+                }
+            }
+            draw();
+        break;
+
 
         case '0b': // ctrl + k remove current fragment
         {
@@ -347,6 +479,10 @@ stdin.on('data', function (key){
                 }
             }
         break;
+        case '1b5b327e': // ins
+            curCtx.$meta.curFrag.detached = !curCtx.$meta.curFrag.detached;
+            draw();
+        break;
         case '1b5b42': // down
             if( curCtx.$meta.curFrag.edit.row+1 < curCtx.$meta.curFrag.code.length ) {
                 curCtx.$meta.curFrag.edit.row++;
@@ -362,7 +498,7 @@ stdin.on('data', function (key){
                 const idx = keys.indexOf(curCtx.$meta.curFrag.name);
                 if(idx+1=== keys.length) {
                     //Create new
-                    curCtx.$meta.curFrag = createFragment(curCtx.$meta.fragments, 'frag_'+idx+1);
+                    curCtx.$meta.curFrag = addFragment( curCtx.$meta.fragments, createFragment('frag_'+(curCtx.$meta.numFrags++) ) );
                 } else {
                     curCtx.$meta.curFrag = curCtx.$meta.fragments[keys[idx+1]];
                 }
@@ -406,7 +542,20 @@ stdin.on('data', function (key){
             }
         break;
         case '0d': // enter
-            if(autoCompleteCandidate) {
+            if(searchTerm) {
+                {
+                    let idx=0;
+                    for(const l of curCtx.$meta.curFrag.code) {
+                        if(l.indexOf(searchTerm) !== -1) {
+                            curCtx.$meta.curFrag.edit.row = idx;
+                            curCtx.$meta.curFrag.edit.col = l.indexOf(searchTerm);
+                            break;
+                        }
+                        idx++;
+                    }
+                }
+                searchTerm=false;
+            } else if(autoCompleteCandidate) {
                 curCtx.$meta.curFrag.code[ row ] = curCtx.$meta.curFrag.code[ row ].slice(0, -autoCompleteOffset) + autoCompleteCandidate;
                 curCtx.$meta.curFrag.edit.col += autoCompleteCandidate.length - autoCompleteOffset;
                 autoCompleteCandidate=null;
@@ -437,6 +586,29 @@ stdin.on('data', function (key){
             const curFragIdx= fragNames.indexOf(curFragName);
             if(curFragIdx > 0) {
                 curCtx.$meta.curFrag = curCtx.$meta.fragments[fragNames[curFragIdx-1]];
+                draw();
+            }
+        }
+        break;
+
+        case '1b5b313b3342': // alt + down
+        {
+            const frag = curCtx.$meta.curFrag;
+            const his = curCtx.$meta.history[frag.name];
+            if(!his) break;
+            if(frag.revision + 1 < his.length) {
+                curCtx.$meta.fragments[frag.name] = curCtx.$meta.curFrag = JSON.parse(JSON.stringify(his[ frag.revision + 1]));
+                draw();
+            }
+        }
+        break;
+        case '1b5b313b3341': // alt + up
+        {
+            const frag = curCtx.$meta.curFrag;
+            const his = curCtx.$meta.history[frag.name];
+            if(!his) break;
+            if(frag.revision > 0) {
+                curCtx.$meta.fragments[frag.name] = curCtx.$meta.curFrag = JSON.parse(JSON.stringify(his[ frag.revision - 1]));
                 draw();
             }
         }
@@ -530,6 +702,11 @@ stdin.on('data', function (key){
             if( /[\x00-\x1F\x80-\x9F]/.test(key)) {
         	    stdout.write('\n<'+Buffer.from(key).toString('hex')+'>\n');
             } else {
+                if(searchTerm !== false) {
+                    searchTerm+= key;
+                    stdout.write( c.red(key));
+                    break;
+                }
                 curCtx.$meta.curFrag.code[curCtx.$meta.curFrag.edit.row] = lin.slice(0, col) + key + lin.slice(col);
                 curCtx.$meta.curFrag.edit.col++;
                 curCtx.$meta.curFrag.edit.executed=false;
@@ -542,3 +719,4 @@ stdin.on('data', function (key){
         autoCompleteCandidate=null;
     }
 });
+// EOF
