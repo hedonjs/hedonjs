@@ -79,26 +79,30 @@ function ctxMvFrag(oldName, newName, overwrite) {
 
 
 const help = `==== hedon interactive, help ==== <=
-  ctrl d      - delete line
-  ctrl r      - run fragment
-  ctrl alt r  - run all fragments
-  ctrl k      - remove fragment
-  ctrl n      - clear context
-  ctrl l      - clear all frament outputs
-  ctrl c      - exit
-  ins         - detach/attach fragment
-  ctrl ins    - split fragment at cursor
-  pgup        -  scroll up
-  pgdn        - scroll down
-  ctrl pgup   - previous fragment
-  ctrl pgdn   - next fragment
-  alt pgup    - scroll up (cursor stays)
-  alt pgdn    - scroll down (cursor stays)
-  alt up      - previous fragment revision
-  alt dn      - next fragment revision
-  ctrl up     - move fragment up
-  ctrl dn     - move fragment down
-  tab         - autocomplete word or insert tab
+  ctrl d       - delete line
+  ctrl r       - run fragment
+  ctrl alt r   - run all fragments
+  ctrl k       - remove fragment
+  ctrl n       - clear context
+  ctrl l       - clear all frament outputs
+  ctrl c       - exit
+  ins          - detach/attach fragment
+  ctrl ins     - split fragment at cursor
+  pgup         -  scroll up
+  pgdn         - scroll down
+  ctrl alt n   - new context
+  ctrl alt k   - delete context
+  ctrl alt lft - previous context
+  ctrl alt rgt - next context
+  ctrl pgup    - previous fragment
+  ctrl pgdn    - next fragment
+  alt pgup     - scroll up (cursor stays)
+  alt pgdn     - scroll down (cursor stays)
+  alt up       - previous fragment revision
+  alt dn       - next fragment revision
+  ctrl up      - move fragment up
+  ctrl dn      - move fragment down
+  tab          - autocomplete word or insert tab
   Also look at the methods on $meta.
 
 `;
@@ -196,6 +200,7 @@ function addContext(name) {
 
     const ctx = {
         '$meta': {
+            '$contexts': contexts,
             name: name,
             fragments: {},
             numFrags: 1,
@@ -236,7 +241,8 @@ function addContext(name) {
     return contexts[name] = vm.createContext(ctx, {name: ctx.$meta.name});
 }
 
-let curCtx = addContext('new');
+let curCtx = addContext('ctx_0');
+let ctxCounter = 1;
 
 
 const edit = curCtx.$meta.curFrag.edit;
@@ -481,7 +487,7 @@ stdin.on('data', function (key){
         }
         break;
 
-        case '0e': //ctrl + n == clear context
+        case '0e': //ctrl + n == clear context (but keep code)
         {
             const newCtx = addContext( curCtx.$meta.name );
             newCtx.$meta = curCtx.$meta;
@@ -495,6 +501,61 @@ stdin.on('data', function (key){
         }
         break;
 
+        case 'c28e': // ctrl + alt + n == add new context
+        {
+            while( contexts['ctx_'+ctxCounter] ) {
+                ctxCounter++;
+            }
+            curCtx = addContext('ctx_'+ctxCounter);
+            curCtx.$meta.curFrag.code = ['// Context '+curCtx.$meta.name,''];
+            curCtx.$meta.curFrag.edit.row=1;
+        }
+        draw();
+        break;
+        case '1b5b313b3743': // ctrl + alt + right == next context
+        {
+            const ctxKeys = Object.keys(contexts);
+            const curCtxIdx = ctxKeys.indexOf(curCtx.$meta.name);
+            if(curCtxIdx +1 === ctxKeys.length) {
+                curCtx = contexts[ ctxKeys[0]];
+            } else {
+                curCtx = contexts[ ctxKeys[curCtxIdx+1] ];
+            }
+            draw();
+        }
+        break;
+        case '1b5b313b3744': // ctrk + alt + left == prev context
+        {
+            const ctxKeys = Object.keys(contexts);
+            const curCtxIdx = ctxKeys.indexOf(curCtx.$meta.name);
+            if(curCtxIdx === 0) {
+                curCtx = contexts[ ctxKeys[ctxKeys.length-1] ];
+            } else {
+                curCtx = contexts[ ctxKeys[curCtxIdx-1] ];
+            }
+            draw();
+        }
+        break;
+        case 'c28b': // ctrl + alt + k == delete context
+        {
+            const ctxKeys = Object.keys(contexts);
+            const ctxIdx = ctxKeys.indexOf(curCtx.$meta.name);
+
+            if(ctxKeys.length>1) {
+                delete contexts[curCtx.$meta.name];
+                if(ctxIdx==0) {
+                    curCtx = contexts[ ctxKeys[1] ];
+                } else {
+                    curCtx = contexts[ ctxKeys[ctxIdx-1]];
+                }
+                draw();
+            } else {
+                stdout.write(' << no other contexts, make a new one first >> ');
+            }
+
+
+        }
+        break;
         case 'c292':
             const lastFrag =curCtx.$meta.curFrag;
             for( const fragName in curCtx.$meta.fragments) {
