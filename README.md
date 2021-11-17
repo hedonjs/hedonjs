@@ -1,5 +1,5 @@
 Bespoke nodejs repl
 
-TODO: support scrolling.
+Type help and press ctrl + r for more help
 
 License: WTFPL.
