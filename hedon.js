@@ -201,6 +201,7 @@ function addContext(name) {
     const ctx = {
         '$meta': {
             '$contexts': contexts,
+            runInHedon: false,
             name: name,
             fragments: {},
             numFrags: 1,
@@ -258,19 +259,21 @@ async function draw(skipCursor) {
 
     for(const fk in curCtx.$meta.fragments ) {
         const frag = curCtx.$meta.fragments[fk];
-        const space = (frag.edit.executed)?' ':'|';
+        const space = (frag.edit.executed)
+                            ? ((curCtx.$meta.runInHedon)?'H':' ')
+                            : ((curCtx.$meta.runInHedon)?'h':'|');
         const source = (curCtx.$meta.opts.highlight)?highlight(frag.code.join('\n'), highlightOpts).split('\n'):frag.code;
         for(const line of source) {
-            if( frag.edit.error ) {
-                outBuf += (c.bgRed(space));
-            } else if(frag.detached) {
-                outBuf += (c.bgYellow.black(space));
-            } else if( (n%2===0)) {
-                outBuf += (c.bgBlue.white(space));
-            } else {
-                outBuf += (c.bgGreen.black(space));
-            }
-            outBuf +=(line+'\n');
+
+            const prefix = ((frag.edit.error)
+                            ? c.bgRed(space)
+                                : (frag.detached)
+                                ? c.bgYellow.black(space)
+                                    : (n%2===0)
+                                        ? c.bgBlue.white(space)
+                                        : c.bgGreen.black(space))+' ';
+
+            outBuf +=(prefix+line+'\n');
             l++;
         }
         if( fk === curCtx.$meta.curFrag.name) {
@@ -305,7 +308,7 @@ async function draw(skipCursor) {
 	await stdout.clearScreenDown();
     // here print outpuf
     await stdout.write(outBuf);
-    await stdout.cursorTo(curCtx.$meta.curFrag.edit.col+1, newY)
+    await stdout.cursorTo(curCtx.$meta.curFrag.edit.col+2, newY)
 
 
 
@@ -348,7 +351,12 @@ function exe(ctx) {
 
     frag.edit.executed = true;
     try {
-        const retVal = vm.runInContext( code, ctx );
+        let retVal;
+        if(ctx.$meta.runInHedon) {
+            retVal = eval(code);
+        } else {
+            retVal = vm.runInContext( code, ctx );
+        }
         if(retVal !== undefined) {
             frag.out = ('=> '+retVal).split('\n').concat(logOut);
         }
