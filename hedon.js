@@ -205,7 +205,7 @@ const metaHelp = ` ==== $meta structure ==== <==
     curFraag        - reference to the currently active fragment (where cursor is)
      |-name         - Fragment name
      |-revision     - Revision number (increments on successful run)
-     |-detached     - Is fragment detached from .fragments when running
+     |-detached     - Fragment detached from .fragments when running, not added to executedScript
      |-code         - Source code in fragment, array of strings, each string a line
      |-out          - Fragment output from last run
      |-edit         - Editor metadata for fragment
@@ -412,7 +412,9 @@ function exe(ctx) {
         const fhis = his[frag.name];
         frag.revision = fhis.length;
         fhis.push( JSON.parse( JSON.stringify(frag) ) );
-        ctx.$meta.executedScript += `\n// ${frag.name} r ${frag.revision}\n${code}\n`;
+        if(!frag.detached) {
+            ctx.$meta.executedScript += `\n// ${frag.name} r ${frag.revision}\n${code}\n`;
+        }
     } catch (e) {
         frag.edit.error = true;
         frag.out = frag.out.concat(e.stack.split('\n'));
