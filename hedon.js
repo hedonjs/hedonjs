@@ -79,32 +79,31 @@ function ctxMvFrag(oldName, newName, overwrite) {
 
 
 const help = `==== hedon interactive, help ==== <=
-  ctrl d       - delete line
-  ctrl r       - run fragment
-  ctrl alt r   - run all fragments
-  ctrl k       - remove fragment
-  ctrl n       - clear context
-  ctrl l       - clear all frament outputs
-  ctrl c       - exit
-  ins          - detach/attach fragment
-  ctrl ins     - split fragment at cursor
-  pgup         -  scroll up
-  pgdn         - scroll down
-  ctrl alt n   - new context
-  ctrl alt k   - delete context
-  ctrl alt lft - previous context
-  ctrl alt rgt - next context
-  ctrl pgup    - previous fragment
-  ctrl pgdn    - next fragment
-  alt pgup     - scroll up (cursor stays)
-  alt pgdn     - scroll down (cursor stays)
-  alt up       - previous fragment revision
-  alt dn       - next fragment revision
-  ctrl up      - move fragment up
-  ctrl dn      - move fragment down
-  tab          - autocomplete word or insert tab
-  Also look at the methods on $meta.
-
+    ctrl d       - delete line
+    ctrl r       - run fragment
+    ctrl alt r   - run all fragments
+    ctrl k       - remove fragment
+    ctrl n       - clear context
+    ctrl l       - clear all frament outputs
+    ctrl c       - exit
+    ins          - detach/attach fragment
+    ctrl ins     - split fragment at cursor
+    ctrl alt n   - new context
+    ctrl alt k   - delete context
+    ctrl alt lft - previous context
+    ctrl alt rgt - next context
+    pgUp         - scroll up
+    pgDn         - scroll down
+    ctrl pgUp    - previous fragment
+    ctrl pgDn    - next fragment
+    alt pgUp     - scroll up (cursor stays)
+    alt pgDn     - scroll down (cursor stays)
+    alt up       - previous fragment revision
+    alt dn       - next fragment revision
+    ctrl up      - move fragment up
+    ctrl dn      - move fragment down
+    tab          - autocomplete word or insert tab
+    - also look at $meta.help
 `;
 
 function ctxSave(fn) {
@@ -196,22 +195,54 @@ function ctxRefrag(...fnum) {
 
 }
 
+const metaHelp = ` ==== $meta structure ==== <==
+    $contexts       - Context datastructures, including this.
+    name            - Name of this context
+    fragments       - Fragmments in this context (map)
+    numFrags        - Number of fragments created (current, and deleted)
+    curFraag        - reference to the currently active fragment (where cursor is)
+     |-name         - Fragment name
+     |-revision     - Revision number (increments on successful run)
+     |-detached     - Is fragment detached from .fragments when running
+     |-code         - Source code in fragment, array of strings, each string a line
+     |-out          - Fragment output from last run
+     |-edit         - Editor metadata for fragment
+       |-row        - Cursor position, row (idx in .code)
+       |-col        - Cursor position, column (character in .code[row])
+       |-executed   - Was fragment execution attempted
+       |-error      - Did fragment execution succeed
+    history         - History of each fragment (successful executions)
+    executedScript  - String containing all successful fragment sources
+    log             - Log method, for outputting text, like console.log
+    save            - Save all non-detached fragments to file
+    load            - Load file into new fragment
+    opts            - Context options
+     |-runInHedon   - Run code in context of hedon iteself
+     |-format       - Run jsbeautify onode when executed
+     |-highlight    - Highlight code
+     |-scrollSpeed  - Number of lines pgUp/pgDn scrolls
+    util            - Utility functions
+
+`;
+
 function addContext(name) {
 
     const ctx = {
         '$meta': {
             '$contexts': contexts,
-            runInHedon: false,
+            help: metaHelp,
             name: name,
             fragments: {},
             numFrags: 1,
             curFrag: null,
             history: {},
+            executedScript: '',
             log: ctxLog,
             save: ctxSave,
             load: ctxLoad,
             opts: {
                 format: true,
+                runInHedon: false,
                 highlight: true,
                 scrollSpeed: 10,
             },
@@ -260,8 +291,8 @@ async function draw(skipCursor) {
     for(const fk in curCtx.$meta.fragments ) {
         const frag = curCtx.$meta.fragments[fk];
         const space = (frag.edit.executed)
-                            ? ((curCtx.$meta.runInHedon)?'H':' ')
-                            : ((curCtx.$meta.runInHedon)?'h':'|');
+                            ? ((curCtx.$meta.opts.runInHedon)?'H':' ')
+                            : ((curCtx.$meta.opts.runInHedon)?'h':'|');
         const source = (curCtx.$meta.opts.highlight)?highlight(frag.code.join('\n'), highlightOpts).split('\n'):frag.code;
         for(const line of source) {
 
@@ -352,7 +383,7 @@ function exe(ctx) {
     frag.edit.executed = true;
     try {
         let retVal;
-        if(ctx.$meta.runInHedon) {
+        if(ctx.$meta.opts.runInHedon) {
             retVal = eval(code);
         } else {
             retVal = vm.runInContext( code, ctx );
@@ -368,6 +399,7 @@ function exe(ctx) {
         const fhis = his[frag.name];
         frag.revision = fhis.length;
         fhis.push( JSON.parse( JSON.stringify(frag) ) );
+        ctx.$meta.executedScript += `\n// ${frag.name} r ${frag.revision}\n${code}\n`;
     } catch (e) {
         frag.edit.error = true;
         logOut.push(e.toString() );
