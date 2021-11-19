@@ -300,7 +300,7 @@ async function draw(skipCursor) {
         const source = (curCtx.$meta.opts.highlight)?highlight(frag.code.join('\n'), highlightOpts).split('\n'):frag.code;
         fragLines=0;
         const maxLinesWidth = (''+(source.length+1)).length;
-        for(const line of source) {
+        for(let line of source) {
             const linesString = (curCtx.$meta.opts.lineNumbers)?(''+(fragLines+1)).padStart(maxLinesWidth,' '):'';
             const prefix = linesString + ((frag.edit.error)
                             ? c.bgRed(space)
@@ -309,7 +309,11 @@ async function draw(skipCursor) {
                                     : (n%2===0)
                                         ? c.bgBlue.white(space)
                                         : c.bgGreen.black(space))+' ';
-
+            const maxWidth = viewPort.width-(linesString.length + 2);
+            const usLine = c.unstyle(line);
+            if(usLine.length > maxWidth) {
+                line = usLine.slice(0, maxWidth-1) + c.green('$');
+            }
             outBuf +=(prefix+line+'\n');
             if( fk === curCtx.$meta.curFrag.name && fragLines === curCtx.$meta.curFrag.edit.row) {
                 cursorOffset = linesString.length+2;
@@ -320,7 +324,11 @@ async function draw(skipCursor) {
         if( fk === curCtx.$meta.curFrag.name) {
             newY = l - curCtx.$meta.curFrag.code.length + curCtx.$meta.curFrag.edit.row - viewPort.firstLine;
         }
-        for(const line of frag.out) {
+        for(let line of frag.out) {
+            const usLine = c.unstyle(line);
+            if(usLine.length > viewPort.width) {
+                line = usLine.slice(0, viewPort.width-1) + c.green('$');
+            }
             outBuf += (line+'\n');
             l++;
         }
