@@ -56,7 +56,7 @@ function ctxLog(...out) {
 function ctxMvFrag(oldName, newName, overwrite) {
 
     if(!oldName) {
-        return `mvFrag(oldName, neName, overwriteExisting); rename a frament, is added last.`;
+        return `mvFrag(oldName, newName, overwriteExisting); rename a frament, is added last.`;
     }
 
     const frag = curCtx.$meta.fragments[oldName];
@@ -197,6 +197,28 @@ function ctxRefrag(...fnum) {
 
 }
 
+function ctxRequire(id) {
+
+    const errorStack=[];
+
+    // local modules
+    try {
+        return require(id);
+    } catch(e) {
+        errorStack.push(e);
+    }
+
+    // from includePaths
+    for(const path of curCtx.$meta.includePaths) {
+        try {
+            return require(`${path}/${id}`);
+        } catch(e) {
+            errorStack.push(e);
+        }
+    }
+    throw new Error(`require('${id}') failed, attempts:\n    ${errorStack.map(e=>e.message).join('\n    ')}\n`);
+}
+
 const metaHelp = ` ==== $meta structure ==== <==
     $contexts       - Context datastructures, including this.
     name            - Name of this context
@@ -224,6 +246,7 @@ const metaHelp = ` ==== $meta structure ==== <==
      |-highlight    - Highlight code
      |-scrollSpeed  - Number of lines pgUp/pgDn scrolls
     util            - Utility functions
+    includePaths    - Array of paths to search from modules, besides hedons own and cwd.
 
 `;
 
@@ -254,9 +277,10 @@ function addContext(name) {
                 mergeFrags: ctxMergeFrags,
                 mvFrag: ctxMvFrag,
                 refrag: ctxRefrag,
-            }
+            },
+            includePaths: [process.cwd(),`${process.cwd()}/node_modules`],
         },
-        require,
+        require: ctxRequire,
         console: {
             log: ctxLog,
             error: (...args)=>ctxLog( ...(args.map(c.red)) ),
@@ -1030,3 +1054,4 @@ stdin.on('data', function (key){
     exitCount=0;
 });
 // EOF
+
