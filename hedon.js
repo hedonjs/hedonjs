@@ -508,6 +508,8 @@ function writeFind() {
 }
 
 stdin.on('data', function (key){
+
+    
 	const hex=Buffer.from(key).toString('hex');
 
     const code = curCtx.$meta.curFrag.code;
@@ -1040,7 +1042,7 @@ stdin.on('data', function (key){
                     break;
                 }
                 curCtx.$meta.curFrag.code[curCtx.$meta.curFrag.edit.row] = lin.slice(0, col) + key + lin.slice(col);
-                curCtx.$meta.curFrag.edit.col++;
+                curCtx.$meta.curFrag.edit.col+=key.length;
                 curCtx.$meta.curFrag.edit.executed=false;
                 draw();
             }
